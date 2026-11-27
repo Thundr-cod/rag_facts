@@ -7,5 +7,8 @@
 .TemporaryItems
 .DocumentRevisions-V100
 
+# Per-PC model pick written by .system/windows/pick-model.ps1 (names the computer)
+.system/.model-choice-*
+
 # NOTE: .metadata_never_index is INTENTIONAL — it ships on the drive to tell
 # macOS Spotlight not to index the volume. Do NOT ignore it.

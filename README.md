@@ -51,7 +51,7 @@ Then the platform-specific AI engines from [llama.cpp releases](https://github.c
 
 | Platform | What you need | Where it goes |
 |---|---|---|
-| **Windows** | `llama-*-bin-win-vulkan-x64.zip` (extract) | `.system/windows/` (needs `llama-cli.exe`, `llama-bench.exe`, `ggml-vulkan.dll`, all `ggml-cpu-*.dll`, `llama.dll` — plus `bench-decide.ps1` from this repo's `.system/windows/`) |
+| **Windows** | `llama-*-bin-win-vulkan-x64.zip` (extract) | `.system/windows/` (needs `llama-cli.exe`, `llama-bench.exe`, `ggml-vulkan.dll`, all `ggml-cpu-*.dll`, `llama.dll` — plus `bench-decide.ps1` and `pick-model.ps1` from this repo's `.system/windows/`) |
 | **Mac (Apple Silicon)** | `llama-*-bin-macos-arm64.tar.gz` (extract) | `.system/` (needs `llama-cli`, all `lib*.dylib`) |
 | **Mac (Intel)** | Build llama.cpp from source for x86_64 (CPU) | `.system/x86_64/` (retail drives ship a custom AVX2 build) |
 | **Linux** | `llama-*-bin-ubuntu-vulkan-x64.tar.gz` (extract) | `.system/linux/` (needs `llama-cli`, `llama-bench`, all `lib*.so`) |
@@ -71,12 +71,14 @@ Then the platform-specific AI engines from [llama.cpp releases](https://github.c
 1. Plug in the drive
 2. Double-click the launcher for your OS
 3. The OSE logo prints, ghost processes are killed, and all chat history is wiped (zero-log privacy — history is wiped at every launch AND at exit, and the exit clears the screen)
-4. Your RAM is detected and the best model is selected:
+4. Your RAM is detected and the best model is selected.
+   **Windows:** any `.gguf` you drop in `.system/` is considered. The launcher keeps the models that fit your RAM + NVIDIA VRAM, benchmarks up to 3 (GPU vs CPU), and runs the biggest one that does at least 5 tokens/sec. If every model is too big or too slow, it stops and tells you to add a smaller one. The pick is cached per computer in `.system/.model-choice-<PC>.txt` (re-tests automatically on a new PC or when models change; delete the file to force a re-test). **Mac/Linux:**
    - 16GB+ → Q8 (high quality) — on Apple Silicon this also checks FREE memory, so a busy machine may pick Q4 on purpose
    - 8-15GB → Q4 (efficiency mode)
 5. Your context window is sized to your RAM: 8K default, 16K on 16GB machines, 32K on 32GB+
 6. The right engine is picked:
-   - **Windows + Linux:** a one-time smart benchmark races your GPU against your CPU (30-90 seconds on first launch — it can look frozen, it is not) and the faster one wins. The result is cached in `.system/.gpu_verified` or `.system/.cpu_mode`; delete those files to re-test after a driver update.
+   - **Windows:** part of the model pick in step 4 (30-90 seconds per model on first launch — it can look frozen, it is not).
+   - **Linux:** a one-time smart benchmark races your GPU against your CPU (30-90 seconds on first launch — it can look frozen, it is not) and the faster one wins. The result is cached in `.system/.gpu_verified` or `.system/.cpu_mode`; delete those files to re-test after a driver update.
    - **Mac:** Apple Silicon uses Metal (no benchmark needed). Intel Macs use the CPU engine in `.system/x86_64/`.
 7. Model loads into memory (10-60 seconds)
 8. `>` prompt appears — start asking questions
@@ -106,7 +108,7 @@ facts (v1.5)/
     ├── lib*.dylib                 # Mac shared libraries
     ├── ose-logo.txt               # Boot logo (printed by all launchers)
     ├── x86_64/                    # Intel Mac engine (CPU)
-    ├── windows/                   # Windows engine (+ llama-bench.exe, bench-decide.ps1)
+    ├── windows/                   # Windows engine (+ llama-bench.exe, bench-decide.ps1, pick-model.ps1)
     ├── linux/                     # Linux engine (+ llama-bench)
     ├── Qwen3.5-4B-abliterated.Q8_0.gguf     # High performance model (~4.5GB)
     └── Qwen3.5-4B-abliterated.Q4_K_M.gguf   # Efficiency model (~2.7GB)
@@ -119,7 +121,8 @@ Full per-platform guides live in `A GUIDE/`. Quick hits:
 | Problem | Fix |
 |---------|-----|
 | First launch sits at "benchmarking" for a minute (Win/Linux) | Normal. One-time GPU-vs-CPU benchmark; the result is cached and future launches are instant. |
-| Want to re-test the GPU after a driver update | Delete `.system/.gpu_verified` and `.system/.cpu_mode`, then relaunch. |
+| Want to re-test the GPU after a driver update | Windows: delete `.system/.model-choice-*.txt`. Linux: delete `.system/.gpu_verified` and `.system/.cpu_mode`. Then relaunch. |
+| "Every model is too big / too slow for this PC" (Windows) | Add a smaller model to `.system/`, e.g. a Q4_K_M of a 1-4B model. |
 | Terminal opens and closes instantly (Windows) | Antivirus quarantined `llama-cli.exe`. Windows Security → Protection History → restore + allow. |
 | "Can't be opened" on double-click (Mac) | Right-click → Open → click "Open" in the dialog. |
 | "Permission denied" (Mac/Linux) | `chmod -R +x` the drive's `.system` folder (see the platform guide). |

@@ -80,129 +80,53 @@ if !AVAIL_GB! LSS 4 (
     echo.
 )
 
-:: 7. GPU DETECTION + SAFETY TEST (Vulkan - works with ANY GPU)
+:: 7. MODEL + DEVICE PICK
+:: pick-model.ps1 looks at every .gguf in .system, keeps the ones that fit this PC, benchmarks a
+:: few (GPU vs CPU) and picks the biggest one that still runs at a usable speed. The pick is
+:: cached per computer, so moving the drive to a new PC re-tests it.
 set "GPU_FLAGS="
-set "GPU_STATUS=CPU only [no compatible GPU detected]"
-set "GPU_NAME="
 
 :: Prevent known Vulkan driver hangs
 set "GGML_VK_DISABLE_COOPMAT=1"
 set "VK_LOADER_LAYERS_DISABLE=~implicit~"
 
-:: Check if user previously forced CPU mode
-if exist "%SYSTEM_DIR%\.cpu_mode" (
-    set "GPU_FLAGS=-ngl 0"
-    for /f "tokens=*" %%g in ('powershell -command "(Get-CimInstance Win32_VideoController | Select-Object -First 1).Name" 2^>nul') do set GPU_NAME=%%g
-    if defined GPU_NAME (
-        set "GPU_STATUS=!GPU_NAME! [CPU mode - saved from previous test]"
-    ) else (
-        set "GPU_STATUS=CPU only [CPU mode forced]"
-    )
-    echo   GPU: !GPU_STATUS!
-    echo   NOTE: Delete .system\.cpu_mode to re-test GPU.
-    goto :model_select
-)
-
-:: Check if GPU was already verified on a previous launch
-if exist "%SYSTEM_DIR%\.gpu_verified" (
-    for /f "tokens=*" %%g in ('powershell -command "(Get-CimInstance Win32_VideoController | Select-Object -First 1).Name" 2^>nul') do set GPU_NAME=%%g
-    if defined GPU_NAME (
-        set "GPU_FLAGS=-ngl auto"
-        set "GPU_STATUS=!GPU_NAME! [Vulkan - previously verified]"
-    ) else (
-        set "GPU_FLAGS=-ngl auto"
-        set "GPU_STATUS=GPU [Vulkan - previously verified]"
-    )
-    echo   GPU: !GPU_STATUS!
-    goto :model_select
-)
-
-:: Check if Vulkan DLL exists
-if exist "%WIN_DIR%\ggml-vulkan.dll" (
-    for /f "tokens=*" %%g in ('powershell -command "(Get-CimInstance Win32_VideoController | Select-Object -First 1).Name" 2^>nul') do set GPU_NAME=%%g
-
-    if defined GPU_NAME (
-        echo   GPU: !GPU_NAME! [benchmarking GPU vs CPU, ~30 seconds, one-time]...
-        echo.
-
-        REM SMART BENCHMARK: run llama-bench on GPU and CPU, pick the faster one.
-        REM Some old iGPUs are SLOWER than CPU on tight VRAM cards
-        REM due to memory bandwidth + Vulkan overhead -- measure performance dont assume.
-        REM Bench a model that actually EXISTS — Q4 may be missing/quarantined while Q8 is present;
-        REM benching a nonexistent path returns FAIL and used to lock CPU mode forever. (memory 32 W2)
-        set "BENCH_MODEL=!MODEL_LOW!"
-        if not exist "!BENCH_MODEL!" set "BENCH_MODEL=!MODEL_HIGH!"
-        set "BENCH_RESULT="
-        for /f "tokens=*" %%r in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%WIN_DIR%\bench-decide.ps1" "%WIN_DIR%\llama-bench.exe" "!BENCH_MODEL!" 2^>nul') do set "BENCH_RESULT=%%r"
-
-        REM BENCH_RESULT format: WINNER pipe primary pipe other  or  FAIL pipe pipe
-        for /f "tokens=1,2,3 delims=|" %%a in ("!BENCH_RESULT!") do (
-            set "BENCH_WINNER=%%a"
-            set "BENCH_PRIMARY=%%b"
-            set "BENCH_OTHER=%%c"
-        )
-
-        if "!BENCH_WINNER!"=="GPU" (
-            set "GPU_FLAGS=-ngl auto"
-            set "GPU_STATUS=!GPU_NAME! [Vulkan: !BENCH_PRIMARY! t/s vs CPU !BENCH_OTHER! t/s]"
-            echo GPU verified [!BENCH_PRIMARY! vs !BENCH_OTHER! t/s] > "%SYSTEM_DIR%\.gpu_verified"
-            echo   GPU: !GPU_STATUS!
-        ) else if "!BENCH_WINNER!"=="CPU" (
-            set "GPU_FLAGS=-ngl 0"
-            set "GPU_STATUS=!GPU_NAME! [CPU: !BENCH_PRIMARY! t/s, GPU was only !BENCH_OTHER! t/s]"
-            echo CPU mode [!BENCH_PRIMARY! vs !BENCH_OTHER! t/s] > "%SYSTEM_DIR%\.cpu_mode"
-            echo   GPU: !GPU_STATUS!
-        ) else (
-            REM Bench FAILED (often AV stalling the first-run binary, or bench-decide.ps1 gone).
-            REM Do NOT write .cpu_mode here — caching a transient failure permanently locks the
-            REM GPU off. Use CPU this session only; re-benchmark next launch. (memory 32 W3)
-            echo   Benchmark inconclusive this launch. Using CPU for now; will re-test next launch.
-            set "GPU_FLAGS=-ngl 0"
-            set "GPU_STATUS=!GPU_NAME! [CPU this session - will retry next launch]"
-            echo   GPU: !GPU_STATUS!
-        )
-    ) else (
-        echo   GPU: !GPU_STATUS!
-    )
-) else (
-    echo   GPU: !GPU_STATUS!
-)
-
-:model_select
-:: 8. SMART MODEL SELECTION
 set "CTX_SIZE=8192"
-REM Context sized to RAM — KV for this 4B model ~144KB/token (16K~2.3GB, 32K~4.6GB). (memory 32 C1)
+REM Context sized to RAM — KV for the stock 4B model ~144KB/token (16K~2.3GB, 32K~4.6GB). (memory 32 C1)
 REM Tiers are nominal-minus-1 (15/30): an integrated-GPU 16GB box reports ~15GB after the
-REM hardware-reserved carve-out, so GEQ 16 would miss it. Matches Q8 selection below. (memory 32 C2)
+REM hardware-reserved carve-out, so GEQ 16 would miss it. (memory 32 C2)
 if !RAM_GB! GEQ 30 (set "CTX_SIZE=32768") else if !RAM_GB! GEQ 15 (set "CTX_SIZE=16384")
 
-if !RAM_GB! GEQ 15 (
-    set "SELECTED_MODEL=!MODEL_HIGH!"
-    set "MODE_NAME=High Performance [Q8]"
-) else (
-    set "SELECTED_MODEL=!MODEL_LOW!"
-    set "MODE_NAME=Efficiency Mode [Q4]"
+echo   Choosing the best model for this PC...
+echo   [First launch on a new PC benchmarks each model, ~30-90 sec each. It is not frozen.]
+set "PICK="
+for /f "tokens=*" %%r in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%WIN_DIR%\pick-model.ps1" "%SYSTEM_DIR%" !CTX_SIZE!') do set "PICK=%%r"
+for /f "tokens=1-4 delims=|" %%a in ("!PICK!") do (
+    set "PICK_STATUS=%%a"
+    set "SELECTED_MODEL=%%b"
+    set "PICK_DEVICE=%%c"
+    set "PICK_TPS=%%d"
 )
 
-:: 9. FALLBACK SAFETY CHECK
-if not exist "!SELECTED_MODEL!" (
-    echo   NOTE: Preferred model not found. Checking for backup...
-    if exist "!MODEL_HIGH!" (
-        set "SELECTED_MODEL=!MODEL_HIGH!"
-        set "MODE_NAME=Backup [Q8]"
-    ) else if exist "!MODEL_LOW!" (
-        set "SELECTED_MODEL=!MODEL_LOW!"
-        set "MODE_NAME=Backup [Q4]"
+if not "!PICK_STATUS!"=="OK" (
+    echo.
+    if "!PICK_STATUS!"=="FAIL" (
+        echo   [ERROR] !SELECTED_MODEL!
     ) else (
-        echo.
-        echo   [ERROR] No models found in .system folder!
-        echo   Please ensure the .gguf files are inside the .system folder.
-        echo   Need help? Visit opensourceeverything.io and use the support chat.
-        echo.
-        pause
-        exit
+        echo   [ERROR] Could not choose a model. pick-model.ps1 may be missing from .system\windows\
     )
+    echo   Need help? Visit opensourceeverything.io and use the support chat.
+    echo.
+    pause
+    exit
 )
+
+if "!PICK_DEVICE!"=="GPU" (set "GPU_FLAGS=-ngl auto") else (set "GPU_FLAGS=-ngl 0")
+if "!PICK_TPS!"=="0" (
+    echo   GPU: Benchmark inconclusive this launch. Using CPU for now; will re-test next launch.
+) else (
+    echo   Device: !PICK_DEVICE! [!PICK_TPS! tokens/sec]
+)
+for %%F in ("!SELECTED_MODEL!") do set "MODE_NAME=%%~nxF"
 
 echo   Loading: !MODE_NAME!
 

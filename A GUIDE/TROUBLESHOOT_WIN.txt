@@ -46,15 +46,17 @@
     .system\windows\ggml-vulkan.dll         -- Vulkan backend
     .system\windows\ggml-cpu-*.dll          -- CPU optimizations
     .system\windows\bench-decide.ps1        -- bench helper
-    .system\Qwen3.5-4B-abliterated...gguf   -- model files
+    .system\windows\pick-model.ps1          -- picks model + GPU/CPU
+    .system\*.gguf                          -- model files (any model)
 
-  Cache files (hidden, in .system\):
-    .gpu_verified  -- saved if GPU beat CPU
-    .cpu_mode      -- saved if CPU beat GPU
+  Cache file (hidden, in .system\):
+    .model-choice-<PC name>.txt  -- the model and GPU/CPU picked
+                                    for this computer
 
-  If the launcher's GPU detection seems wrong (e.g., your card
-  is fast but the launcher chose CPU), delete both cache files
-  and the launcher will re-test on the next launch. If the
+  If the launcher's pick seems wrong (e.g., your card is fast but
+  the launcher chose CPU), delete that file and the launcher will
+  re-test on the next launch. It also re-tests by itself on a
+  different PC or when you add or remove a model. If the
   benchmark FAILS (rather than losing), nothing is cached. The
   launcher uses CPU for that session only and re-tests next
   launch automatically.
@@ -185,6 +187,7 @@
        - ggml-vulkan.dll
        - several ggml-cpu-*.dll files
        - bench-decide.ps1
+       - pick-model.ps1
        - vcruntime140.dll, vcruntime140_1.dll, and
          msvcp140.dll (Microsoft runtime files)
 
@@ -287,33 +290,28 @@
   whichever is faster. Some integrated GPUs (Intel UHD 6xx/7xx,
   older AMD APUs) are actually slower than the CPU due to
   memory bandwidth limits -- in which case the launcher
-  correctly picks CPU. If CPU won the benchmark, later
-  launches will show:
+  correctly picks CPU. Every launch shows what was picked:
 
-      [CPU mode - saved from previous test]
-
-  and if GPU won:
-
-      [Vulkan - previously verified]
+      Device: GPU [94.52 tokens/sec]     (or Device: CPU ...)
 
   TO RE-RUN THE BENCHMARK (e.g., after a driver update):
     1. Open File Explorer, show hidden items.
     2. Navigate to the .system folder on the drive.
-    3. Delete .gpu_verified and .cpu_mode if either exists.
-       (The launcher reminds you too:
-       NOTE: Delete .system\.cpu_mode to re-test GPU.)
+    3. Delete .model-choice-<PC name>.txt.
     4. Re-run WindowsLaunch.bat. The benchmark will repeat
        on this launch and pick fresh.
+
+  "EVERY MODEL IS TOO BIG" / "RUNS TOO SLOWLY" ERROR:
+    The launcher checks every .gguf model in .system. If none
+    fit this PC's memory, or none reach 5 tokens/sec, it stops
+    instead of running something unusable. Add a smaller model
+    to .system (for example a Q4_K_M of a 1-4B model).
 
   IF THE BENCHMARK FAILS:
   Sometimes the benchmark can't finish (antivirus stalling
   it is the usual culprit). You'll see:
 
       Benchmark inconclusive this launch. Using CPU for now; will re-test next launch.
-
-  and the status line will say:
-
-      [CPU this session - will retry next launch]
 
   This is NOT cached. Nothing to delete. Just relaunch (after
   adding an antivirus exclusion, see Issue 2) and it will

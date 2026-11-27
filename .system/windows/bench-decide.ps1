@@ -2,7 +2,7 @@
 # Runs llama-bench on GPU and CPU, compares t/s, outputs one line:
 #   GPU|<gpu_ts>|<cpu_ts>   if GPU wins (10% margin)
 #   CPU|<cpu_ts>|<gpu_ts>   if CPU wins
-#   FAIL||                  if benchmark failed
+#   FAIL||                  if both benchmarks failed (a single failed side is reported as 0)
 
 param(
     [string]$BenchPath,
@@ -37,10 +37,13 @@ $gpuTG = Get-TokensPerSec $gpuOut
 $cpuOut = & $BenchPath -m $ModelPath -ngl 0 -p 0 -n 32 --no-warmup 2>$null
 $cpuTG = Get-TokensPerSec $cpuOut
 
-if (-not $gpuTG -or -not $cpuTG) {
+if (-not $gpuTG -and -not $cpuTG) {
     Write-Output "FAIL||"
     exit
 }
+# One side failed (e.g. model only fits with GPU help): the side that ran wins; 0 marks the other.
+if (-not $cpuTG) { Write-Output "GPU|$gpuTG|0"; exit }
+if (-not $gpuTG) { Write-Output "CPU|$cpuTG|0"; exit }
 
 $gpu = [float]$gpuTG
 $cpu = [float]$cpuTG

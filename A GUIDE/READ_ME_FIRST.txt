@@ -41,6 +41,8 @@
      1. Open the .system folder (it is hidden, so turn on
         "show hidden files" first).
      2. Delete .gpu_verified and .cpu_mode if either one exists.
+        (Windows re-tests by itself on a new computer. To force
+        it, delete .model-choice-<PC name>.txt instead.)
      3. Run the launcher again. The 30-second test repeats for
         the new hardware.
 

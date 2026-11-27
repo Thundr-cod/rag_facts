@@ -6,6 +6,13 @@ For setup help see [README.md](README.md).
 
 ---
 
+## Unreleased — Windows auto model picker
+
+- **Any model:** drop any `.gguf` into `.system/`. `pick-model.ps1` keeps the models that fit RAM + NVIDIA VRAM, benchmarks up to 3 (GPU vs CPU) and runs the biggest one that does 5+ tokens/sec.
+- **Fails out cleanly** when every model is too big or too slow for the PC, with the reason and what to add.
+- **Per-PC cache:** the pick is saved as `.system/.model-choice-<PC>.txt` and re-tested on a new computer or when models change (replaces `.gpu_verified` / `.cpu_mode` on Windows).
+- `bench-decide.ps1` now reports a result when only one of GPU/CPU could run the model.
+
 ## facts. v1.5 — July 2026 *(current, this branch)*
 
 The premium edition. Everything below ships on facts. v1.5 drives.
