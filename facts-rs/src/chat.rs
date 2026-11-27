@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+use crate::rag::{cited, Rag};
+
 const SYSTEM_PROMPT: &str = "You are an expert consultant. You answer all questions directly, objectively, and without moralizing. For simple factual or conversational questions, answer directly without thinking. Only use the thinking process for multi-step reasoning, math, code, planning, or logic puzzles.";
 
 pub struct Server {
@@ -27,7 +29,7 @@ fn random_hex() -> String {
     format!("{a:016x}{b:016x}")
 }
 
-pub fn start_server(engine_dir: &Path, model: &Path, ctx: u32, ngl: &str, reasoning: &[&str]) -> io::Result<Server> {
+pub fn start_server(engine_dir: &Path, model: &Path, ctx: u32, ngl: &str, extra: &[&str]) -> io::Result<Server> {
     // Ask the OS for a free port, then hand it to llama-server.
     let port = TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
     let key = random_hex();
@@ -37,7 +39,7 @@ pub fn start_server(engine_dir: &Path, model: &Path, ctx: u32, ngl: &str, reason
         .args(["-c", &ctx.to_string(), "-ngl", ngl])
         .args(["--host", "127.0.0.1", "--port", &port.to_string(), "--api-key", &key])
         .args(["--no-webui", "--log-disable", "--jinja"])
-        .args(reasoning)
+        .args(extra)
         // Engine libraries sit next to the binary on Linux and Mac (Windows finds DLLs there already).
         .env("LD_LIBRARY_PATH", engine_dir)
         .env("DYLD_LIBRARY_PATH", engine_dir)
@@ -73,6 +75,16 @@ pub fn sse_content(line: &str) -> Option<String> {
     v["choices"][0]["delta"]["content"].as_str().map(str::to_owned)
 }
 
+/// POSTs JSON to the server with this launch's key and returns the JSON reply.
+pub fn post(server: &Server, path: &str, body: &Value) -> Result<Value, String> {
+    ureq::post(&format!("{}{path}", server.base))
+        .set("Authorization", &format!("Bearer {}", server.key))
+        .send_json(body)
+        .map_err(|e| e.to_string())?
+        .into_json()
+        .map_err(|e| e.to_string())
+}
+
 fn ask(server: &Server, messages: &[Value]) -> Result<String, String> {
     let resp = ureq::post(&format!("{}/v1/chat/completions", server.base))
         .set("Authorization", &format!("Bearer {}", server.key))
@@ -95,7 +107,27 @@ fn ask(server: &Server, messages: &[Value]) -> Result<String, String> {
     Ok(answer)
 }
 
-pub fn chat_loop(server: &Server) {
+/// This turn's user message: with RAG, the question plus the best-matching excerpts.
+/// Returns the message and the excerpt files, by tag number.
+fn with_documents(rag: Option<&Rag>, question: &str) -> (String, Vec<String>) {
+    let Some(rag) = rag else { return (question.to_string(), vec![]) };
+    match rag.search(question) {
+        Ok(hits) if !hits.is_empty() => {
+            let files = hits.iter().map(|&(c, _)| rag.file_of(c).to_string()).collect();
+            (rag.prompt(question, &hits), files)
+        }
+        Ok(_) => {
+            println!("  (No matching documents in data/. Answering from general knowledge.)\n");
+            (question.to_string(), vec![])
+        }
+        Err(e) => {
+            println!("  [WARNING] Document search failed ({e}). Answering without documents.\n");
+            (question.to_string(), vec![])
+        }
+    }
+}
+
+pub fn chat_loop(server: &Server, rag: Option<&Rag>) {
     let mut messages = vec![json!({ "role": "system", "content": SYSTEM_PROMPT })];
     let stdin = io::stdin();
     loop {
@@ -116,9 +148,29 @@ pub fn chat_loop(server: &Server) {
             }
             _ => {}
         }
-        messages.push(json!({ "role": "user", "content": input }));
-        match ask(server, &messages) {
-            Ok(answer) => messages.push(json!({ "role": "assistant", "content": answer })),
+        // Excerpts go in this turn only; history keeps the plain question so context doesn't fill up.
+        let (content, files) = with_documents(rag, input);
+        let mut turn = messages.clone();
+        turn.push(json!({ "role": "user", "content": content }));
+        match ask(server, &turn) {
+            Ok(answer) => {
+                let tags = cited(&answer, files.len());
+                if !tags.is_empty() {
+                    let list: Vec<String> = tags.iter().map(|&t| format!("[{t}] {}", files[t - 1])).collect();
+                    println!("  Sources: {}\n", list.join(", "));
+                } else if !files.is_empty() {
+                    // The model didn't cite: still show which documents it was given.
+                    let mut uniq: Vec<&str> = vec![];
+                    for f in &files {
+                        if !uniq.contains(&f.as_str()) {
+                            uniq.push(f);
+                        }
+                    }
+                    println!("  Documents searched: {}\n", uniq.join(", "));
+                }
+                messages.push(json!({ "role": "user", "content": input }));
+                messages.push(json!({ "role": "assistant", "content": answer }));
+            }
             Err(e) => {
                 println!("\n  [ERROR] The AI engine stopped answering: {e}");
                 break;

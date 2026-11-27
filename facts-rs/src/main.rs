@@ -2,7 +2,9 @@
 //! Lives at <drive>/.system/facts-<os>; the per-OS launcher scripts only start it.
 
 mod chat;
+mod gguf;
 mod picker;
+mod rag;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -88,6 +90,14 @@ fn main() {
         exe.parent().and_then(Path::parent).expect("facts must live in <drive>/.system/").to_path_buf()
     });
     let system_dir = root.join(".system");
+    if std::env::args().any(|a| a == "--forget") {
+        match rag::forget(&system_dir) {
+            Ok(true) => println!("  Deleted the saved RAG index (.system/rag). Files in data/ were not touched."),
+            Ok(false) => println!("  No saved RAG index to delete."),
+            Err(e) => fail(&format!("Could not delete .system/rag: {e}")),
+        }
+        return;
+    }
     let plat = platform();
     let engine = engine_dir(&system_dir, plat);
 
@@ -132,6 +142,8 @@ fn main() {
     // Context sized to RAM; tiers are nominal-minus-1 because a 16 GB iGPU box reports ~15 GB.
     let ctx = if ram_gb >= 30.0 { 32768 } else if ram_gb >= 15.0 { 16384 } else { 8192 };
 
+    let rag_plan = rag::plan(&root, &system_dir, ram_gb);
+
     println!("  Choosing the best model for this PC...");
     println!("  [First launch on a new PC benchmarks each model, ~30-90 sec each. It is not frozen.]");
     let host = System::host_name().unwrap_or_else(|| "this-pc".into());
@@ -141,6 +153,11 @@ fn main() {
     let budget = match plat {
         Platform::MacArm | Platform::MacIntel => (ram_gb - 2.0).min(avail_gb),
         _ => ram_gb - 2.0 + picker::nvidia_vram_gb(),
+    };
+    // The embedding server runs next to the chat model, so its memory comes off the budget.
+    let budget = match &rag_plan {
+        rag::Plan::On { model, .. } => budget - model.need_gb(),
+        rag::Plan::Off(_) => budget,
     };
     let pick = picker::pick(&system_dir, &engine, budget, ctx, &host, plat == Platform::MacIntel)
         .unwrap_or_else(|e| fail(&e));
@@ -158,18 +175,29 @@ fn main() {
     let reasoning: [&str; 2] = if plat == Platform::MacIntel { ["--reasoning", "off"] } else { ["--reasoning-budget", "0"] };
     let mut server = chat::start_server(&engine, &pick.path, ctx, pick.device.ngl(), &reasoning)
         .unwrap_or_else(|e| fail(&format!("Could not start the AI engine: {e}")));
+    let rag = start_rag(&root, &system_dir, &engine, rag_plan);
     if let Err(e) = chat::wait_ready(&mut server) {
         let _ = server.child.kill();
+        if let Some(mut r) = rag {
+            let _ = r.server.child.kill();
+        }
         fail(&e);
+    }
+    if let Some(r) = &rag {
+        println!("  {}", r.status());
     }
     println!("----------------------------------------------------------------");
     println!("  AI READY. Type below to chat. /clear starts over, /exit quits.");
     println!("----------------------------------------------------------------\n");
 
-    chat::chat_loop(&server);
+    chat::chat_loop(&server, rag.as_ref());
 
     let _ = server.child.kill();
     let _ = server.child.wait();
+    if let Some(mut r) = rag {
+        let _ = r.server.child.kill();
+        let _ = r.server.child.wait();
+    }
     wipe(&root, &system_dir);
     clear_screen();
     println!("----------------------------------------------------------------");
@@ -177,4 +205,41 @@ fn main() {
     println!("  If it stopped unexpectedly: check your antivirus, close other apps to free RAM, then relaunch.");
     println!("{HELP}");
     println!("----------------------------------------------------------------");
+}
+
+/// Starts the embedding server and brings the index up to date. Any failure turns RAG off for this
+/// launch (plain chat still runs) with the reason shown.
+fn start_rag(root: &Path, system_dir: &Path, engine: &Path, plan: rag::Plan) -> Option<rag::Rag> {
+    let off = |why: &str| println!("  RAG: off ({why})");
+    let (model, files) = match plan {
+        rag::Plan::Off(why) => {
+            off(&why);
+            return None;
+        }
+        rag::Plan::On { model, files } => (model, files),
+    };
+    println!("  Documents: {} file(s) in data/, embedding model {}", files.len(), model.name);
+    // Whole input in one batch (embedding models aren't causal); CPU, so it never competes for VRAM.
+    let n = model.ctx.to_string();
+    let extra = ["--embedding", "-b", &n, "-ub", &n, "-np", "1"];
+    let mut server = match chat::start_server(engine, &model.path, model.ctx as u32, "0", &extra) {
+        Ok(s) => s,
+        Err(e) => {
+            off(&format!("could not start the embedding engine: {e}"));
+            return None;
+        }
+    };
+    if let Err(e) = chat::wait_ready(&mut server) {
+        let _ = server.child.kill();
+        off(&e);
+        return None;
+    }
+    match rag::update(system_dir, root, &model, files, &server) {
+        Ok(index) => Some(rag::Rag { server, model, index }),
+        Err(e) => {
+            let _ = server.child.kill();
+            off(&format!("indexing failed: {e}"));
+            None
+        }
+    }
 }

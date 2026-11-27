@@ -6,6 +6,17 @@ For setup help see [README.md](README.md).
 
 ---
 
+## facts 0.0.3 — Ask your documents (M3, unreleased)
+
+- **RAG for `.txt` and `.md`:** drop files into `data/` and ask about them. Answers use the 5 best-matching passages and list the files they came from (`Sources: [1] notes.md`); a question that matches nothing is answered from general knowledge, and `facts` says so.
+- **Bring your own embedding model:** any GGUF embedding model in `.system/embed/` (files without a pooling type are rejected). `bge-small-en-v1.5` is the default and is used when there are several. It runs in its own `llama-server --embedding` on `127.0.0.1` with its own port and key, on the CPU, and its memory comes off the chat model's budget.
+- **Consent and visibility:** before the first index `facts` asks; no `yes`, no index, plain chat. Every launch prints `RAG index: N chunks from M files (stored on this drive)`, or `RAG: off (reason)`.
+- **Index:** `.system/rag/index.bin`, written atomically (temp file + rename). Only new or changed files (path, size, modified time) are embedded again; removed files drop out; a different embedding model or chunk setting rebuilds it. Chunks are about half the model's input limit (256 tokens for bge-small) with 10% overlap, split on paragraphs and headings, and checked against the model's real tokenizer.
+- **`facts --forget`** deletes `.system/rag/`. Emptying `data/` deletes it too.
+- **Zero-log kept for chat:** questions, answers and retrieved passages stay in memory; the conversation history keeps the plain question, not the passages.
+- RAG needs 8 GB RAM; below that, plain chat with the reason shown.
+- New GGUF header reader (`gguf.rs`), used for the embedding model's input limit, vector size and pooling type.
+
 ## facts 0.0.2 — Release builds (M2, unreleased)
 
 - **CI** (`.github/workflows/ci.yml`): every PR is tested and linted on Windows, macOS and Linux, and builds `facts-windows.exe`, a universal `facts-macos` (Apple Silicon + Intel, ad-hoc signed) and a static `facts-linux`.
