@@ -6,12 +6,17 @@ For setup help see [README.md](README.md).
 
 ---
 
-## Unreleased — Windows auto model picker
+## facts 0.0.1 — Rust launcher (M1, unreleased)
 
-- **Any model:** drop any `.gguf` into `.system/`. `pick-model.ps1` keeps the models that fit RAM + NVIDIA VRAM, benchmarks up to 3 (GPU vs CPU) and runs the biggest one that does 5+ tokens/sec.
-- **Fails out cleanly** when every model is too big or too slow for the PC, with the reason and what to add.
-- **Per-PC cache:** the pick is saved as `.system/.model-choice-<PC>.txt` and re-tested on a new computer or when models change (replaces `.gpu_verified` / `.cpu_mode` on Windows).
-- `bench-decide.ps1` now reports a result when only one of GPU/CPU could run the model.
+One Rust program, `facts` (source in `facts-rs/`), now does everything the three launcher scripts did. The scripts shrink to their per-OS setup step plus starting `.system/facts-<os>`.
+
+- **Any model, every OS:** drop any `.gguf` into `.system/`. `facts` keeps the models that fit (RAM + NVIDIA VRAM; free memory on Macs), benchmarks up to 3 (GPU vs CPU) and runs the biggest one that does 5+ tokens/sec (Intel Macs: the smallest that does). Fails out with the reason when every model is too big or too slow.
+- **Per-PC cache:** the pick is saved as `.system/.model-choice-<PC>.txt` and re-tested on a new computer or when models change (replaces `.gpu_verified` / `.cpu_mode`). Same format as the earlier Windows picker.
+- **Engine:** `llama-server` on `127.0.0.1` with a random port and a new API key each launch, web UI off, logs off. Terminal chat streams answers; `/clear` and `/exit`.
+- **Zero-log kept:** history and session files wiped at launch, at exit and on Ctrl+C; conversation held in memory only; screen cleared on exit.
+- **Mac fixes carried over:** Apple Silicon detected from hardware (Rosetta-safe), `--reasoning off` on the Intel engine.
+- **Windows:** static C runtime (no VCRUNTIME140 error); launcher clears the downloaded-file mark with `Unblock-File`.
+- Removed `pick-model.ps1` and `bench-decide.ps1`. Engines now need `llama-server` (and `llama-bench` for benchmarking) instead of `llama-cli`.
 
 ## facts. v1.5 — July 2026 *(current, this branch)*
 
