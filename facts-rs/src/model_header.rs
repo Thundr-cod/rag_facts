@@ -1,4 +1,5 @@
-//! Minimal GGUF header reader: the key/value metadata at the start of a .gguf file.
+//! Model header reader: the GGUF metadata (architecture, context length, vector size, pooling type)
+//! at the start of a .gguf model file, read without loading the model.
 //! Only scalar values are kept; arrays (tokenizer vocabularies etc.) are skipped.
 //! Format: https://github.com/ggml-org/ggml/blob/master/docs/gguf.md
 

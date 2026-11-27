@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::chat::{self, Server};
-use crate::gguf;
+use crate::model_header;
 
 const FORMAT_VERSION: u32 = 1;
 const CHUNKER_VERSION: u32 = 1;
@@ -170,7 +170,7 @@ pub fn find_model(system_dir: &Path) -> Result<EmbedModel, String> {
         if !name.to_lowercase().ends_with(".gguf") || name.starts_with('.') {
             continue;
         }
-        let h = match gguf::read_header(&e.path()) {
+        let h = match model_header::read_header(&e.path()) {
             Ok(h) => h,
             Err(err) => {
                 println!("  [WARNING] Skipping {name} in .system/embed: unreadable ({err}).");
@@ -613,7 +613,7 @@ mod tests {
         fs::create_dir_all(&embed).unwrap();
         fs::write(embed.join("junk.gguf"), b"not a model").unwrap();
         assert!(find_model(&dir).is_err());
-        fs::write(embed.join("bge-small-en-v1.5-q8_0.gguf"), crate::gguf::tests::fake_embed_header()).unwrap();
+        fs::write(embed.join("bge-small-en-v1.5-q8_0.gguf"), crate::model_header::tests::fake_embed_header()).unwrap();
         let m = find_model(&dir).unwrap();
         assert_eq!((m.ctx, m.dim), (512, 384));
         let _ = fs::remove_dir_all(dir);

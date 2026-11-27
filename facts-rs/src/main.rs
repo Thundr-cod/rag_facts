@@ -2,7 +2,7 @@
 //! Lives at <drive>/.system/facts-<os>; the per-OS launcher scripts only start it.
 
 mod chat;
-mod gguf;
+mod model_header;
 mod picker;
 mod rag;
 

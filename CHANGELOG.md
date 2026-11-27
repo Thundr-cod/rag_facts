@@ -15,7 +15,7 @@ For setup help see [README.md](README.md).
 - **`facts --forget`** deletes `.system/rag/`. Emptying `data/` deletes it too.
 - **Zero-log kept for chat:** questions, answers and retrieved passages stay in memory; the conversation history keeps the plain question, not the passages.
 - RAG needs 8 GB RAM; below that, plain chat with the reason shown.
-- New GGUF header reader (`gguf.rs`), used for the embedding model's input limit, vector size and pooling type.
+- New model header reader (`model_header.rs`, reads GGUF metadata), used for the embedding model's input limit, vector size and pooling type.
 
 ## facts 0.0.2 — Release builds (M2, unreleased)
 
