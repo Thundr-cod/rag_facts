@@ -1,0 +1,114 @@
+# CI for the facts launcher (facts-rs/).
+# Every PR and push to main: test + lint on Windows, macOS and Linux, then build the release
+# binaries as downloadable artifacts. A pushed tag vX.Y.Z also publishes a GitHub release with
+# the three binaries and SHA256SUMS.txt. Builds are unsigned (see the design doc's Risks).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+    working-directory: facts-rs
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            out: facts-windows.exe
+          - os: macos-latest
+            out: facts-macos
+          - os: ubuntu-latest
+            out: facts-linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Windows x64 (static CRT, version info embedded)
+        if: runner.os == 'Windows'
+        run: |
+          cargo build --release --locked
+          cp target/release/facts.exe ../facts-windows.exe
+
+      - name: Build macOS universal (Apple Silicon + Intel), ad-hoc signed
+        if: runner.os == 'macOS'
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+          lipo -create -output ../facts-macos \
+            target/aarch64-apple-darwin/release/facts target/x86_64-apple-darwin/release/facts
+          codesign --force --sign - ../facts-macos
+          lipo -info ../facts-macos
+
+      - name: Build Linux x64 (static musl, runs on any distro)
+        if: runner.os == 'Linux'
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --release --locked --target x86_64-unknown-linux-musl
+          cp target/x86_64-unknown-linux-musl/release/facts ../facts-linux
+          file ../facts-linux
+
+      - name: Smoke test
+        run: ../${{ matrix.out }} --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.out }}
+          path: ${{ matrix.out }}
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag must match the crate version
+        run: |
+          crate="v$(sed -n 's/^version = "\(.*\)"/\1/p' facts-rs/Cargo.toml)"
+          [ "$GITHUB_REF_NAME" = "$crate" ] || { echo "Tag $GITHUB_REF_NAME != Cargo.toml $crate"; exit 1; }
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum facts-* > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --prerelease \
+            --title "facts $GITHUB_REF_NAME" --notes-file .github/release-notes.md

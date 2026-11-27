@@ -1,15 +1,21 @@
 [package]
 name = "facts"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 description = "Offline, zero-log AI launcher for the facts. flash drive"
 license = "MIT" # same as the launcher scripts (see README License)
 
 [dependencies]
-ureq = { version = "2", features = ["json"] }
+# No TLS or gzip: facts only talks to llama-server on 127.0.0.1 over plain HTTP, so the binary
+# can't reach the internet even by mistake (and builds without C code on every target).
+ureq = { version = "2", default-features = false, features = ["json"] }
 serde_json = "1"
 sysinfo = "0.33"
 ctrlc = "3"
+
+[target.'cfg(windows)'.build-dependencies]
+# Version info in the .exe: unsigned binaries without it are flagged by antivirus more often.
+winresource = "0.1"
 
 [profile.release]
 opt-level = "z"

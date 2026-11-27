@@ -56,7 +56,9 @@ Then the platform-specific AI engines from [llama.cpp releases](https://github.c
 | **Mac (Intel)** | Build llama.cpp from source for x86_64 (CPU) | `.system/x86_64/` (needs `llama-server`; retail drives ship a custom AVX2 build) |
 | **Linux** | `llama-*-bin-ubuntu-vulkan-x64.tar.gz` (extract) | `.system/linux/` (needs `llama-server`, `llama-bench`, all `lib*.so`) |
 
-Then the `facts` launcher itself (Rust, source in `facts-rs/`). Until releases are published, build it with [Rust](https://rustup.rs) and copy it into `.system/`:
+Then the `facts` launcher itself (Rust, source in `facts-rs/`). Download `facts-windows.exe`, `facts-macos` and `facts-linux` from this repo's [Releases](../../releases) page into `.system/`, and check them against the release's `SHA256SUMS.txt`. The builds are **not code-signed**; the release notes list the one-time first-launch steps for Windows and Mac.
+
+Or build it yourself with [Rust](https://rustup.rs):
 
 ```
 cd facts-rs
@@ -65,6 +67,8 @@ cargo build --release
 # Mac:     cp target/release/facts ../.system/facts-macos
 # Linux:   cp target/release/facts ../.system/facts-linux
 ```
+
+Every pull request is tested and built on Windows, macOS and Linux by `.github/workflows/ci.yml`; pushing a tag like `v0.0.2` publishes a release.
 
 ## Hardware Requirements
 
@@ -129,7 +133,8 @@ Full per-platform guides live in `A GUIDE/`. Quick hits:
 | Want to re-test the GPU after a driver update | Delete `.system/.model-choice-*.txt`, then relaunch. |
 | "Every model is too big / too slow for this PC" | Add a smaller model to `.system/`, e.g. a Q4_K_M of a 1-4B model. |
 | Terminal opens and closes instantly (Windows) | Antivirus quarantined `facts-windows.exe` or `llama-server.exe`. Windows Security → Protection History → restore + allow. |
-| "Can't be opened" on double-click (Mac) | Right-click → Open → click "Open" in the dialog. |
+| "Can't be opened" on double-click (Mac) | The launcher isn't code-signed. Right-click → Open → click "Open" in the dialog (macOS 15: System Settings → Privacy & Security → Open Anyway). Once only. |
+| "Windows protected your PC" (SmartScreen) | The launcher isn't code-signed. Click "More info" → "Run anyway". Once only. |
 | "Permission denied" (Mac/Linux) | `chmod -R +x` the drive's `.system` folder (see the platform guide). |
 | Intel Mac | Fully supported: the launcher auto-detects and runs the CPU engine (slower than Apple Silicon, works fine). |
 | Slow performance | Close other apps. The AI wants 4GB+ free RAM. |

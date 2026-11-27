@@ -6,6 +6,14 @@ For setup help see [README.md](README.md).
 
 ---
 
+## facts 0.0.2 — Release builds (M2, unreleased)
+
+- **CI** (`.github/workflows/ci.yml`): every PR is tested and linted on Windows, macOS and Linux, and builds `facts-windows.exe`, a universal `facts-macos` (Apple Silicon + Intel, ad-hoc signed) and a static `facts-linux`.
+- **Releases:** pushing a `vX.Y.Z` tag that matches the crate version publishes the three binaries plus `SHA256SUMS.txt`, with first-launch steps for unsigned builds.
+- **Smaller, offline-only binary:** HTTP client built without TLS or gzip, so `facts` can only reach `127.0.0.1` (Windows .exe 2 MB → 0.9 MB).
+- **Windows:** version info embedded in the .exe (unsigned files without it are flagged more often).
+- README: download from Releases, checksum check, SmartScreen and Gatekeeper first-launch steps.
+
 ## facts 0.0.1 — Rust launcher (M1, unreleased)
 
 One Rust program, `facts` (source in `facts-rs/`), now does everything the three launcher scripts did. The scripts shrink to their per-OS setup step plus starting `.system/facts-<os>`.
