@@ -18,3 +18,8 @@ facts-rs/target/
 .system/facts-windows.exe
 .system/facts-macos
 .system/facts-linux
+
+# User documents and the RAG index built from them (personal; never commit)
+data/
+.system/rag/
+.system/embed/*.gguf

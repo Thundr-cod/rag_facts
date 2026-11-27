@@ -45,6 +45,12 @@ The model files (~7.2 GB total) go in the `.system/` folder:
 | `Qwen3.5-4B-abliterated.Q8_0.gguf` | ~4.5GB | [HuggingFace](https://huggingface.co/mradermacher/Qwen3.5-4B-abliterated-GGUF) |
 | `Qwen3.5-4B-abliterated.Q4_K_M.gguf` | ~2.7GB | [HuggingFace](https://huggingface.co/mradermacher/Qwen3.5-4B-abliterated-GGUF) |
 
+For asking questions about your own documents (optional), the embedding model goes in `.system/embed/`:
+
+| File | Size | Source |
+|------|------|--------|
+| `bge-small-en-v1.5-f16.gguf` | ~67MB | [HuggingFace](https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf) (base model [BAAI/bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5), MIT) |
+
 Model credits: base model [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) by Alibaba Cloud (Qwen Team) · abliteration by [wangzhang](https://huggingface.co/wangzhang/Qwen3.5-4B-abliterated) (made with the Abliterix tool) · GGUF quantization by [mradermacher](https://huggingface.co/mradermacher/Qwen3.5-4B-abliterated-GGUF) · Apache 2.0.
 
 Then the platform-specific AI engines from [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases) (build b8783 or newer):
@@ -90,6 +96,17 @@ Every pull request is tested and built on Windows, macOS and Linux by `.github/w
 6. The engine (`llama-server`) loads the model on `127.0.0.1` only, with a fresh access key each launch (10-60 seconds)
 7. `>` prompt appears — start asking questions. `/clear` starts over, `/exit` quits
 
+### Ask your documents (RAG)
+
+Put `.txt` and `.md` files in the `data/` folder on the drive (subfolders are fine). On the next launch `facts` reads them and uses the best-matching passages to answer your questions, and lists the files it used under each answer (`Sources: [1] notes.md`). Questions that match nothing are answered from the model's general knowledge, and it says so.
+
+- **Needs:** an embedding model in `.system/embed/` (see Required Downloads) and 8GB+ RAM. Without either, `facts` runs plain chat and prints why. Any GGUF embedding model works; with several, `bge-small-en-v1.5` is used if present, else the smallest.
+- **What is saved:** this is the one exception to zero-log. To search your documents, `facts` keeps text passages from them plus their embeddings in `.system/rag/index.bin` on the drive. Before the first index it asks, and nothing is saved unless you type `yes`. Every launch prints `RAG index: N chunks from M files (stored on this drive)`.
+- **What is not saved:** your questions, the answers and the passages pulled for them stay in memory only, as before.
+- **Updating:** new and edited files are indexed at launch; removed files drop out of the index. Emptying `data/` deletes the index.
+- **Deleting:** run `facts --forget` (for example `.system\facts-windows.exe --forget`) to delete `.system/rag/`. Your files in `data/` are not touched.
+- Anyone holding the drive can read `data/` and the index. Encryption is planned for a later version.
+
 Thinking mode is OFF by default for fast, direct answers. Enabling it (and raising the context size) is documented in `A GUIDE/READ_ME_FIRST.txt` under ADVANCED TWEAKS.
 
 ## What's In the Box
@@ -100,6 +117,7 @@ facts (v1.5)/
 ├── MacLaunch.command              # Mac launcher (clears quarantine, starts facts-macos)
 ├── LinuxLaunch.sh                 # Linux launcher (starts facts-linux)
 ├── facts-rs/                      # Source of the facts launcher (Rust)
+├── data/                          # Your .txt / .md documents for RAG (created at first launch)
 ├── Launch facts (Linux)           # Linux launcher (double-click ELF)
 ├── ose-logo.txt                   # Boot logo — copy into .system/
 ├── A GUIDE/
@@ -119,6 +137,8 @@ facts (v1.5)/
     ├── x86_64/                    # Intel Mac engine (CPU)
     ├── windows/                   # Windows engine (+ llama-bench.exe)
     ├── linux/                     # Linux engine (+ llama-bench)
+    ├── embed/                     # Embedding model for RAG (bge-small-en-v1.5)
+    ├── rag/index.bin              # Saved RAG index (only after you say yes)
     ├── Qwen3.5-4B-abliterated.Q8_0.gguf     # High performance model (~4.5GB)
     └── Qwen3.5-4B-abliterated.Q4_K_M.gguf   # Efficiency model (~2.7GB)
 ```
@@ -149,6 +169,7 @@ Full per-platform guides live in `A GUIDE/`. Quick hits:
 | GPU acceleration | Vulkan (Windows / Linux), Metal (Mac Apple Silicon) | — |
 | Model | [Qwen3.5-4B abliterated](https://huggingface.co/mradermacher/Qwen3.5-4B-abliterated-GGUF) (wangzhang abliteration of Qwen3.5-4B) | Apache 2.0 |
 | Context Window | 8K / 16K / 32K, sized to your RAM | — |
+| Embeddings (RAG) | [bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) by BAAI, via `llama-server --embedding` | MIT |
 
 ## Changelog
 
