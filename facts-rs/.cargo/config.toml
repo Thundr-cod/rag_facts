@@ -1,0 +1,3 @@
+# Static C runtime on Windows: no VCRUNTIME140.dll needed (TROUBLESHOOT_WIN ISSUE 15).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

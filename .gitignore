@@ -7,5 +7,14 @@
 .TemporaryItems
 .DocumentRevisions-V100
 
+# Per-PC model pick written by the facts launcher (names the computer)
+.system/.model-choice-*
+
 # NOTE: .metadata_never_index is INTENTIONAL — it ships on the drive to tell
 # macOS Spotlight not to index the volume. Do NOT ignore it.
+
+# facts launcher build output (attached to releases, not committed)
+facts-rs/target/
+.system/facts-windows.exe
+.system/facts-macos
+.system/facts-linux

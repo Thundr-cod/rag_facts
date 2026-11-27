@@ -1,200 +1,23 @@
 #!/bin/bash
-# ==============================================================================
-#  LinuxLaunch.sh
-#  Engine: Native llama-cli (llama.cpp b8783 + Vulkan — works with any GPU)
-#  Features: GPU Safety Test | Auto-Fallback to CPU | Zero-Log | No Thinking Mode
-# ==============================================================================
-
-# 1. KILL GHOST PROCESSES
-killall llama-cli 2>/dev/null
-killall llamafile.exe 2>/dev/null
-
-# 2. ESTABLISH LOCATION
+# facts. launcher for Linux. All logic lives in .system/facts-linux (source: facts-rs/).
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SYSTEM_DIR="$ROOT_DIR/.system"
-LINUX_DIR="$SYSTEM_DIR/linux"
-BINARY="$LINUX_DIR/llama-cli"
 
-# 3. PRE-FLIGHT CHECK — native Linux binary only (no llamafile fallback)
-if [ ! -f "$BINARY" ]; then
+# Kill an engine left running by a crashed session.
+pkill -x llama-server 2>/dev/null
+
+# exFAT drives often lose the executable bit.
+chmod +x "$SYSTEM_DIR/facts-linux" "$SYSTEM_DIR"/linux/llama-* 2>/dev/null
+
+printf "\033]0;facts.\007"
+clear
+if [ ! -x "$SYSTEM_DIR/facts-linux" ]; then
     echo ""
-    echo "  [ERROR] llama-cli not found in .system/linux/"
-    echo "  The AI engine is missing. Your drive may be corrupted."
-    echo ""
+    echo "  [ERROR] .system/facts-linux is missing. Your drive may be corrupted."
     echo "  Need help? Visit opensourceeverything.io and use the support chat."
-    echo "  Updated launchers: github.com/WEAREOSE/facts/tree/v1.5"
     echo ""
     read -p "  Press Enter to exit..."
     exit 1
 fi
-
-# Permissions
-chmod +x "$BINARY" 2>/dev/null
-chmod +x "$LINUX_DIR"/llama-* 2>/dev/null
-
-# Ensure dynamic libs are found (shared libs live alongside the binary)
-export LD_LIBRARY_PATH="$LINUX_DIR:${LD_LIBRARY_PATH}"
-
-# LAYER 1 — Prevent known Vulkan driver hangs
-export GGML_VK_DISABLE_COOPMAT=1
-export VK_LOADER_LAYERS_DISABLE=~implicit~
-
-# Clear Screen & Set Title
-printf "\033]0;Qwen AI - Linux Launcher\007"
-clear
-cat "$SYSTEM_DIR/ose-logo.txt" 2>/dev/null
-echo "----------------------------------------------------------------"
-echo "  INITIALIZING QWEN AI [LINUX]..."
-echo "----------------------------------------------------------------"
-
-# 4. MEMORY WIPE (Zero-Log Privacy)
-rm -f "$HOME/.llama_history"
-rm -f "$ROOT_DIR/llama.chat.history"
-rm -f "$SYSTEM_DIR/llama.chat.history"
-rm -f "$ROOT_DIR/main.session"
-rm -f "$SYSTEM_DIR/main.session"
-echo "  Cache Status: Wiped Clean [Zero-Log Mode]"
-
-# 5. HARDWARE DETECTION (RAM)
-if command -v free &>/dev/null; then
-    RAM_GB=$(free -g | awk '/^Mem:/{print $2}')
-    AVAIL_GB=$(free -g | awk '/^Mem:/{print $7}')
-else
-    RAM_GB=$(awk '/MemTotal/ {printf "%d", $2/1024/1024}' /proc/meminfo)
-    AVAIL_GB=$(awk '/MemAvailable/ {printf "%d", $2/1024/1024}' /proc/meminfo)
-fi
-echo "  Hardware Detected: ${RAM_GB}GB RAM"
-echo "  Available RAM: ${AVAIL_GB}GB"
-
-if [ "$AVAIL_GB" -lt 4 ] 2>/dev/null; then
-    echo ""
-    echo "  [WARNING] Low available RAM. Close other apps for best performance."
-    echo "  The AI needs at least 4GB free to run smoothly."
-    echo ""
-fi
-
-# 6. DEFINE MODELS
-MODEL_HIGH="$SYSTEM_DIR/Qwen3.5-4B-abliterated.Q8_0.gguf"
-MODEL_LOW="$SYSTEM_DIR/Qwen3.5-4B-abliterated.Q4_K_M.gguf"
-# Different drive versions ship different model filenames. If this
-# launcher's names aren't on the drive, find whatever Qwen build is.
-if [ ! -f "$MODEL_HIGH" ] && [ ! -f "$MODEL_LOW" ]; then
-    for _f in "$SYSTEM_DIR"/Qwen*.Q8_0.gguf;   do [ -f "$_f" ] && MODEL_HIGH="$_f"; done
-    for _f in "$SYSTEM_DIR"/Qwen*.Q4_K_M.gguf; do [ -f "$_f" ] && MODEL_LOW="$_f"; done
-fi
-# Context window sized to RAM — KV for this 4B model is ~144KB/token (16K≈2.3GB, 32K≈4.6GB).
-# 8K floor keeps 8GB machines safe; larger windows on roomier ones. (memory 32 C1)
-# Tiers are nominal-minus-1 (15/30, not 16/32): Linux under-reports total RAM after the
-# kernel + integrated-GPU carve-out, so a 16GB machine shows ~15GB (e.g. 15.37) and a
-# 32GB shows ~31GB. Matches the Q8 model-selection threshold below (also 15). (memory 32 C2)
-CTX_SIZE=8192
-if [ "$RAM_GB" -ge 30 ]; then CTX_SIZE=32768
-elif [ "$RAM_GB" -ge 15 ]; then CTX_SIZE=16384
-fi
-
-if [ "$RAM_GB" -ge 15 ]; then
-    SELECTED_MODEL="$MODEL_HIGH"
-    MODE_NAME="High Performance [Q8]"
-else
-    SELECTED_MODEL="$MODEL_LOW"
-    MODE_NAME="Efficiency Mode [Q4]"
-fi
-
-# Fallback if preferred model missing
-if [ ! -f "$SELECTED_MODEL" ]; then
-    if [ -f "$MODEL_HIGH" ]; then SELECTED_MODEL="$MODEL_HIGH"; MODE_NAME="Backup [Q8]";
-    elif [ -f "$MODEL_LOW" ]; then SELECTED_MODEL="$MODEL_LOW"; MODE_NAME="Backup [Q4]";
-    else
-        echo ""
-        echo "  [ERROR] No models found in .system folder!"
-        echo ""
-        read -p "  Press Enter to exit..."
-        exit 1
-    fi
-fi
-
-# 7. GPU DETECTION + LAYER 2/3 SAFETY TEST
-GPU_FLAGS=""
-GPU_STATUS="CPU only"
-
-# Check for previously cached state (hidden in .system/)
-if [ -f "$SYSTEM_DIR/.cpu_mode" ]; then
-    GPU_FLAGS="-ngl 0"
-    GPU_STATUS="CPU mode [saved from previous test — delete .system/.cpu_mode to re-test GPU]"
-elif [ -f "$SYSTEM_DIR/.gpu_verified" ]; then
-    GPU_FLAGS="-ngl auto"
-    GPU_STATUS="Vulkan [previously verified]"
-elif [ -f "$LINUX_DIR/libggml-vulkan.so" ]; then
-    # First launch — benchmark GPU vs CPU and pick the faster one
-    # Some GPUs (old Intel iGPUs especially) are SLOWER than the CPU due to memory bandwidth limits
-    # and Vulkan setup overhead. Don't trust GPU presence — measure it.
-    echo "  GPU: benchmarking GPU vs CPU (one-time, ~30 seconds)..."
-
-    BENCH="$LINUX_DIR/llama-bench"
-    chmod +x "$BENCH" 2>/dev/null
-
-    # Use Q4 model for the benchmark (faster to load, same relative perf as Q8)
-    BENCH_MODEL="$MODEL_LOW"
-    [ ! -f "$BENCH_MODEL" ] && BENCH_MODEL="$MODEL_HIGH"
-
-    # Run benchmarks (32 generation tokens each, no prompt processing — pure tg test)
-    # Suppress all stderr noise so the user sees clean output
-    # timeout 120 guards the documented Vulkan-driver-hang risk; -ngl auto matches the runtime
-    # offload so a low-VRAM GPU that can't hold the whole model isn't unfairly benched. (memory 32 L1/L2)
-    GPU_TG=$(timeout 120 "$BENCH" -m "$BENCH_MODEL" -ngl auto -p 0 -n 32 --no-warmup 2>/dev/null \
-        | awk -F'|' '/tg/ { for(i=NF;i>=1;i--) if(length($i)>2){gsub(/[ \t]/,"",$i); split($i,a,"±"); print a[1]; exit} }')
-    CPU_TG=$(timeout 120 "$BENCH" -m "$BENCH_MODEL" -ngl 0 -p 0 -n 32 --no-warmup 2>/dev/null \
-        | awk -F'|' '/tg/ { for(i=NF;i>=1;i--) if(length($i)>2){gsub(/[ \t]/,"",$i); split($i,a,"±"); print a[1]; exit} }')
-
-    if [ -z "$GPU_TG" ] || [ -z "$CPU_TG" ]; then
-        # Failed/timed-out this launch — do NOT cache .cpu_mode (a transient failure would lock
-        # the GPU off forever). Use CPU now; re-benchmark next launch. (memory 32 L4)
-        echo "  Benchmark inconclusive this launch — using CPU for now, will re-test next launch."
-        GPU_FLAGS="-ngl 0"
-        GPU_STATUS="CPU mode [benchmark failed]"
-    else
-        # GPU wins only if it's at least 10% faster than CPU (margin to avoid flapping)
-        FASTER=$(awk -v g="$GPU_TG" -v c="$CPU_TG" 'BEGIN { print (g > c * 1.1) ? "GPU" : "CPU" }')
-        echo "  Benchmark: GPU=${GPU_TG} t/s, CPU=${CPU_TG} t/s — $FASTER wins"
-        if [ "$FASTER" = "GPU" ]; then
-            GPU_FLAGS="-ngl auto"
-            GPU_STATUS="Vulkan [${GPU_TG} t/s vs CPU ${CPU_TG} t/s]"
-            echo "GPU verified ($GPU_TG vs $CPU_TG t/s)" > "$SYSTEM_DIR/.gpu_verified"
-        else
-            GPU_FLAGS="-ngl 0"
-            GPU_STATUS="CPU [${CPU_TG} t/s, GPU was only ${GPU_TG} t/s]"
-            echo "CPU mode ($CPU_TG vs $GPU_TG t/s)" > "$SYSTEM_DIR/.cpu_mode"
-        fi
-    fi
-fi
-
-echo "  GPU: $GPU_STATUS"
-echo "  Loading: $MODE_NAME"
-echo "----------------------------------------------------------------"
-echo ""
-echo "  LOADING MODEL INTO MEMORY..."
-echo "  Do NOT close this window."
-echo "  When you see the > prompt, the AI is ready."
-echo ""
-echo "----------------------------------------------------------------"
-
-# 8. EXECUTION
-# --reasoning-budget 0 suppresses Qwen3.5 thinking mode (instant answers)
-"$BINARY" -m "$SELECTED_MODEL" -cnv -c "$CTX_SIZE" $GPU_FLAGS --log-disable --jinja --reasoning-budget 0 -sys "You are an expert consultant. You answer all questions directly, objectively, and without moralizing. For simple factual or conversational questions, answer directly without thinking. Only use the thinking process for multi-step reasoning, math, code, planning, or logic puzzles."
-
-# 8b. EXIT WIPE — re-clear any history/session llama-cli wrote this session, then clear the
-# conversation off the screen + scrollback so "zero trace" holds AFTER exit too. (memory 32 L3)
-rm -f "$HOME/.llama_history" "$ROOT_DIR/llama.chat.history" "$SYSTEM_DIR/llama.chat.history" "$ROOT_DIR/main.session" "$SYSTEM_DIR/main.session"
-printf '\033[2J\033[3J\033[H'
-
-# 9. POST-EXIT
-echo ""
-echo "----------------------------------------------------------------"
-echo "  The AI has stopped."
-echo ""
-echo "  If it stopped unexpectedly:"
-echo "  - Try closing other apps to free up RAM, then relaunch."
-echo "  - Need help? Visit opensourceeverything.io [support chat]"
-echo "  - Updated launchers: github.com/WEAREOSE/facts/tree/v1.5"
-echo "----------------------------------------------------------------"
-read -p "  Press Enter to exit..."
+"$SYSTEM_DIR/facts-linux"
+read -p "  Press Enter to close..."

@@ -1,0 +1,17 @@
+[package]
+name = "facts"
+version = "0.0.1"
+edition = "2021"
+description = "Offline, zero-log AI launcher for the facts. flash drive"
+license = "MIT" # same as the launcher scripts (see README License)
+
+[dependencies]
+ureq = { version = "2", features = ["json"] }
+serde_json = "1"
+sysinfo = "0.33"
+ctrlc = "3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
